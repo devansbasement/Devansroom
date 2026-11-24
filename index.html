@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevansRoom | Live Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 18px; background: #101827; font-family: Arial, sans-serif; color: #172033; }
+    .app { width: min(100%, 780px); height: min(900px, 92vh); min-height: 540px; display: flex; flex-direction: column; overflow: hidden; background: white; border-radius: 18px; box-shadow: 0 18px 55px #0006; }
+    header { padding: 19px 22px; color: white; background: #2563eb; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    h1 { margin: 0; font-size: 21px; } header p { margin: 5px 0 0; font-size: 13px; opacity: .88; }
+    #status { font-size: 12px; white-space: nowrap; background: #ffffff25; padding: 7px 10px; border-radius: 20px; }
+    .setup { display: flex; gap: 9px; padding: 13px 16px; background: #f4f7fc; border-bottom: 1px solid #e6ebf3; }
+    input { min-width: 0; padding: 12px; border: 1px solid #d4dce9; border-radius: 10px; font: inherit; outline: none; }
+    input:focus { border-color: #2563eb; } #name { width: 210px; }
+    #messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 20px; background: #fbfcff; }
+    .msg { max-width: 82%; align-self: flex-start; } .msg.mine { align-self: flex-end; }
+    .meta { margin: 0 5px 5px; color: #7a8497; font-size: 11px; }
+    .bubble { padding: 11px 14px; border-radius: 14px 14px 14px 4px; background: #e9eef7; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .mine .bubble { background: #2563eb; color: white; border-radius: 14px 14px 4px 14px; }
+    .notice { margin: auto; text-align: center; color: #8993a5; line-height: 1.6; }
+    form { display: flex; gap: 9px; padding: 14px 16px; border-top: 1px solid #e6ebf3; }
+    #message { flex: 1; } button { border: 0; border-radius: 10px; padding: 0 20px; color: white; background: #2563eb; font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: not-allowed; } button:hover:not(:disabled) { background: #1d4ed8; }
+    footer { padding: 8px 12px; text-align: center; color: #8993a5; font-size: 11px; }
+    @media(max-width: 520px) { body { padding: 0; } .app { height: 100vh; min-height: 480px; border-radius: 0; } #name { width: 140px; } #messages { padding: 14px; } .msg { max-width: 90%; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div><h1>DevansRoom</h1><p>Chat live with your friends</p></div>
+      <span id="status">Connecting…</span>
+    </header>
+    <div class="setup">
+      <input id="name" maxlength="24" placeholder="Choose your username" aria-label="Username">
+    </div>
+    <section id="messages" aria-live="polite">
+      <div class="notice">Connecting to DevansRoom…</div>
+    </section>
+    <form id="form">
+      <input id="message" maxlength="500" placeholder="Write a message…" autocomplete="off" required aria-label="Message">
+      <button id="send" type="submit" disabled>Send</button>
+    </form>
+    <footer>Be respectful. Never share passwords or sensitive personal information.</footer>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import {
+      getDatabase, ref, push, query, limitToLast, onChildAdded, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCGbndOB1AfNKiLfSuzBg8ipakf0mYoRWM",
+      authDomain: "devansroom-4f3ec.firebaseapp.com",
+      databaseURL: "https://devansroom-4f3ec-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "devansroom-4f3ec",
+      storageBucket: "devansroom-4f3ec.firebasestorage.app",
+      messagingSenderId: "549262200443",
+      appId: "1:549262200443:web:e8d7b7d7a106d716671cde",
+      measurementId: "G-TSXPHK53SD"
+    };
+
+    const statusEl = document.getElementById("status");
+    const messagesEl = document.getElementById("messages");
+    const nameEl = document.getElementById("name");
+    const messageEl = document.getElementById("message");
+    const sendButton = document.getElementById("send");
+    const form = document.getElementById("form");
+
+    nameEl.value = localStorage.getItem("devansRoomName") || "";
+
+    function showNotice(text) {
+      messagesEl.replaceChildren();
+      const notice = document.createElement("div");
+      notice.className = "notice";
+      notice.textContent = text;
+      messagesEl.appendChild(notice);
+    }
+
+    function renderMessage(data) {
+      const empty = messagesEl.querySelector(".notice");
+      if (empty) empty.remove();
+
+      const item = document.createElement("article");
+      const myName = nameEl.value.trim() || "Guest";
+      item.className = "msg" + (data.name === myName ? " mine" : "");
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const date = data.timestamp ? new Date(data.timestamp) : new Date();
+      meta.textContent = `${data.name || "Guest"} · ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = data.text || "";
+
+      item.append(meta, bubble);
+      messagesEl.appendChild(item);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function startChat() {
+      try {
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+
+        await signInAnonymously(auth);
+
+        const messagesQuery = query(
+          ref(db, "rooms/public/messages"),
+          limitToLast(100)
+        );
+
+        onChildAdded(messagesQuery, snapshot => {
+          renderMessage(snapshot.val() || {});
+        }, error => {
+          statusEl.textContent = "Database error";
+          showNotice("Could not read chat messages. Check your Firebase Database Rules.");
+          console.error(error);
+        });
+
+        statusEl.textContent = "● Online";
+        sendButton.disabled = false;
+
+        form.addEventListener("submit", async event => {
+          event.preventDefault();
+          const text = messageEl.value.trim();
+          const name = nameEl.value.trim().replace(/\s+/g, " ") || "Guest";
+          if (!text) return;
+
+          sendButton.disabled = true;
+          try {
+            localStorage.setItem("devansRoomName", name);
+            await push(ref(db, "rooms/public/messages"), {
+              name,
+              text,
+              timestamp: serverTimestamp()
+            });
+            messageEl.value = "";
+            messageEl.focus();
+          } catch (error) {
+            alert("Message could not be sent. Check your Firebase Database Rules.");
+            console.error(error);
+          } finally {
+            sendButton.disabled = false;
+          }
+        });
+
+        nameEl.addEventListener("change", () => {
+          localStorage.setItem("devansRoomName", nameEl.value.trim());
+        });
+
+      } catch (error) {
+        statusEl.textContent = "Connection failed";
+        showNotice("Firebase connection failed. Check Anonymous Authentication and your Realtime Database Rules.");
+        console.error(error);
+      }
+    }
+
+    startChat();
+  </script>
+</body>
+</html>
